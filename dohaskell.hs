@@ -6,12 +6,9 @@ import Protolude hiding (log)
 import Data.String (String)
 import Data.Text (unlines)
 import Control.Error
--- import Control.Monad.Trans.Except
--- import Data.List (stripPrefix)
 import System.FilePath
 import System.Process
 import System.Directory
--- import System.IO (withFile, IOMode(WriteMode))
 import Control.Error.Script
 
 import NeatInterpolation (text)
@@ -26,37 +23,18 @@ main = runScript $ do
   cFiles <- scriptIO $ filter ((==".cabal").takeExtension) <$> listDirectory dir
   when (length cFiles > 1) $
     throwE "more than one cabal files, aborting"
-  cFile <- tryHead "no cabal file, aborting" cFiles
+  filename <- toS . dropExtension <$> tryHead "no cabal file, aborting" cFiles
 
-  let filename = toS $ dropExtension cFile
-  slog $ filename<>".cabal" <> " -> " <> filename<>".nix"
-  -- exceptT _fo _ba-- (throwE.show) (scriptIO . putStrLn . Nix.fromStorePath)
+  slog $ filename <> ".cabal" <> " -> " <> filename <> ".nix"
   foo <- bimapExceptT show Nix.fromStorePath
     $ Nix.parseInstRealize $ programNix (toS dir) filename
+  -- tmp
   scriptIO $ putStrLn foo
 
-  -- let defaultNix = dir </> "default.nix"
-  -- pure . writeIfNotExists defaultNix $ [text|
-  --   with import <nixpkgs> {};
-  --   haskellPackages.callPackage ${defaultNix};
-  -- |]
 
-  where
-    writeIfNotExists :: FilePath -> Text -> IO ()
-    writeIfNotExists f s = do
-          e <- not <$> doesFileExist f
-          when e $ do
-            log $ "writing " <> toS f
-            writeFile f s
-
-log :: Text -> IO ()
-log = putStrLn
-slog = scriptIO . log
-
-
-
-programNix folder filename = (\a -> trace a a)
-  -- escaping twice with $${} to not splice in haskell values
+programNix :: Text -> Text -> Text
+programNix folder filename =
+  -- escaping twice with $${} to not splice in Haskell values
   [text|
     with import <nixpkgs> {};
     let
@@ -70,3 +48,6 @@ programNix folder filename = (\a -> trace a a)
         echo "(import ./default.nix).env" > $$out/shell.nix
       ''
   |]
+
+log = putStrLn
+slog = scriptIO . log
