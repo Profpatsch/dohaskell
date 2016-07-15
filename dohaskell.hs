@@ -17,6 +17,10 @@ import Control.Error.Script
 import NeatInterpolation (text)
 import qualified Foreign.Nix.Shellout as Nix
 
+-- TODO: autogenerate nix files on change of cabal file
+-- TODO: use default.nix if it already exists, don’t generate shim in that case
+-- TODO: boot into <command> afterwards
+
 main = runScript $ do
   dir <- scriptIO getCurrentDirectory
   cFiles <- scriptIO $ filter ((==".cabal").takeExtension) <$> listDirectory dir
