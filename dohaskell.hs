@@ -2,7 +2,8 @@
 
 import Protolude hiding (log)
 import Data.String (String)
-import Data.Text (unlines)
+import Data.Text (lines, unlines)
+import Data.Foldable (foldr1)
 import Control.Error
 import System.FilePath
 import System.Process
@@ -10,10 +11,11 @@ import System.Directory
 import System.Posix.Files (createSymbolicLink)
 import System.IO.Error (isAlreadyExistsError)
 import Control.Error.Script
+import qualified Text.PrettyPrint as Pr
 
 import NeatInterpolation (text)
 import qualified Foreign.Nix.Shellout as Nix
-import Foreign.Nix.Shellout (StorePath, Realized, NixAction)
+import Foreign.Nix.Shellout (StorePath, Realized, NixAction, NixError(RealizeError))
 
 -- TODO: autogenerate nix files on change of cabal file
 -- TODO: boot into <command> afterwards
@@ -42,17 +44,19 @@ realMain currentDir = runScript $ do
     <$> tryHead "no cabal file, aborting" cabFiles
 
   -- actual work
-  storeFiles <- forM nixFiles
-    $ \f -> StoreFile f <$> (nixToScript identity $ Nix.addToStore f)
-  outDir <- nixToScript Nix.fromStorePath
-    $ Nix.parseInstRealize $ programNix storeFiles (toS currentDir) filename
+  outDir <- nixScript $ do
+    storeFiles <- forM nixFiles
+      $ \f -> StoreFile f
+        <$> (Nix.liftError Nix.RealizeError $ Nix.addToStore f)
+    Nix.fromStorePath
+      <$> (Nix.parseInstRealize $ programNix storeFiles (toS currentDir) filename)
 
   scriptIO $ putStrLn outDir
   scriptIO $ outDir `linkEachTo` currentDir
 
   where
-    nixToScript :: Show a => (b -> c) -> NixAction a b -> NixAction String c
-    nixToScript = bimapExceptT show
+    nixToScript :: (b -> c) -> NixAction NixError b -> ExceptT String IO c
+    nixToScript = bimapExceptT prettyPrintNixError
     linkEachTo fromdir todir =
       listDirectory fromdir >>= mapM_ (symlink todir . (fromdir</>))
     symlink todir from =
@@ -61,6 +65,13 @@ realMain currentDir = runScript $ do
                    (createSymbolicLink from tofile)
                    (const $ whenM (isSymbolicLink tofile)
                               $ removeFile tofile *> symlink todir from)
+    prettyPrintNixError :: (Text, NixError) -> String
+    prettyPrintNixError (stderr, err) = Pr.render
+      $        Pr.text (show err)
+        Pr.$+$ ""
+        Pr.$+$ "Nix stderr:"
+        Pr.$+$ foldr1 (Pr.$+$) (Pr.text . toS <$> lines stderr)
+    nixScript = withExceptT prettyPrintNixError
 
 -- This is an abomination.
 programNix :: [StoreFile] -> Text -> Text -> Text
